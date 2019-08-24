@@ -38,11 +38,37 @@ NORETURN void mp_strict_mode_error(void) {
 }
 
 bool mp_handle_store_ns_strict(mp_map_t *map, mp_obj_t attr, mp_obj_t val, bool is_const) {
-    (void)is_const; // TODO
-    if (mp_strict_runtime) {
-        mp_map_elem_t *elem = mp_map_lookup(map, attr, MP_MAP_LOOKUP);
+    if (mp_strict_mode) {
+        if (!map->all_keys_are_qstrs || map->is_fixed) {
+            mp_raise_TypeError(NULL);
+        }
+
+        mp_map_elem_t *elem = mp_map_lookup(map, attr,
+            mp_strict_runtime ? MP_MAP_LOOKUP : MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+
+        // If it was runtime, and no attr was found, it's error
         if (elem == NULL) {
             mp_strict_mode_error();
+        }
+
+        if (elem->value != MP_OBJ_NULL) {
+            if (MP_MAP_QSTR_KEY_IS_CONST(elem->key)) {
+                if (mp_strict_runtime) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("strict mode: cannot override const name"));
+                } else {
+                    mp_warning(MP_WARN_CAT(RuntimeWarning), "strict mode: overriding (monkey-patching) const name");
+                }
+            } else if (is_const) {
+                if (mp_strict_runtime) {
+                    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("strict mode: name already defined as variable"));
+                } else {
+                    mp_warning(MP_WARN_CAT(RuntimeWarning), "strict mode: overriding var with func");
+                }
+            }
+        }
+
+        if (is_const) {
+            elem->key = MP_MAP_QSTR_KEY_CONST(attr);
         }
         elem->value = val;
         return true;
